@@ -8,62 +8,135 @@ from sdn.policy_apply import apply_rule
 
 st.set_page_config(
     page_title="NetIntent-Shield",
-    page_icon="🛡️",
+    page_icon="🌐",
     layout="wide"
 )
 
 
 st.markdown("""
 <style>
-.main-title {
-    font-size: 34px;
-    font-weight: 800;
-    margin-bottom: 5px;
+.block-container {
+    padding-top: 2rem;
+    max-width: 980px;
 }
-.sub-title {
-    font-size: 16px;
-    color: #666;
+
+[data-testid="stSidebar"] {
+    background-color: #f7f8fb;
+}
+
+.title-box {
+    text-align: center;
+    margin-top: 10px;
     margin-bottom: 25px;
 }
-.card {
-    background-color: #f8f9fb;
-    padding: 18px;
-    border-radius: 14px;
-    border: 1px solid #e6e8ef;
-    margin-bottom: 15px;
+
+.main-title {
+    font-size: 36px;
+    font-weight: 800;
+    color: #222;
 }
-.small-card {
-    background-color: #ffffff;
-    padding: 14px;
-    border-radius: 12px;
-    border: 1px solid #e6e8ef;
-    margin-bottom: 10px;
+
+.sub-title {
+    font-size: 15px;
+    color: #777;
+    margin-top: 8px;
 }
-.agent-box {
-    background-color: #f2f6ff;
-    padding: 18px;
-    border-radius: 14px;
+
+.chat-card {
+    background: #ffffff;
+    border: 1px solid #e7e9f0;
+    border-radius: 18px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+}
+
+.user-msg {
+    background: #eef6ff;
     border-left: 5px solid #3b82f6;
-    margin-bottom: 15px;
 }
-.user-box {
-    background-color: #f7f7f7;
-    padding: 16px;
-    border-radius: 14px;
+
+.agent-msg {
+    background: #f8fafc;
     border-left: 5px solid #10b981;
-    margin-bottom: 15px;
+}
+
+.warn-msg {
+    background: #fff7ed;
+    border-left: 5px solid #f97316;
+}
+
+.error-msg {
+    background: #fef2f2;
+    border-left: 5px solid #ef4444;
+}
+
+.section-label {
+    font-size: 15px;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.small-text {
+    font-size: 13px;
+    color: #666;
+}
+
+.footer-input {
+    border-top: 1px solid #eee;
+    padding-top: 18px;
+}
+
+.status-pill {
+    display: inline-block;
+    background: #ecfdf5;
+    color: #047857;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    margin-right: 8px;
+}
+
+.topo-box {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 12px;
 }
 </style>
 """, unsafe_allow_html=True)
 
 
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+if "default_intent" not in st.session_state:
+    st.session_state.default_intent = "隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器"
+
+
 with st.sidebar:
-    st.markdown("## 🛡️ NetIntent-Shield")
-    st.caption("AI-SDN 智能网络意图编排系统")
+    st.markdown("## 设置")
+    if st.button("🧹 清除对话历史", use_container_width=True):
+        st.session_state.history = []
 
     st.markdown("---")
-    st.markdown("### 当前拓扑")
 
+    st.markdown("## 能力说明")
+    st.markdown("""
+- 查询当前网络拓扑  
+- 理解自然语言网络安全意图  
+- 生成结构化访问控制策略  
+- 检测策略冲突  
+- 调用 Ryu 下发 OpenFlow 流表  
+- 生成 Mininet 验证命令  
+- 输出闭环验证报告  
+""")
+
+    st.markdown("---")
+
+    st.markdown("## 当前拓扑")
+    st.markdown('<div class="topo-box">', unsafe_allow_html=True)
     st.code("""
 Ryu Controller
       |
@@ -73,110 +146,167 @@ h1 ---- s1 ---- s2 ---- h3
         |       |
         h2      h4
 """)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("### 主机角色")
-    st.write("**h1**：正常用户")
-    st.write("**h2**：异常主机 / 疑似攻击主机")
-    st.write("**h3**：Web服务器 / 业务服务器")
-    st.write("**h4**：数据库服务器")
-    st.write("**s1**：办公网交换机")
-    st.write("**s2**：服务器区交换机")
+    st.markdown("## 主机角色")
+    st.markdown("""
+**h1**：正常用户  
+**h2**：异常主机 / 疑似攻击主机  
+**h3**：Web服务器 / 业务服务器  
+**h4**：数据库服务器  
+**s1**：办公网交换机  
+**s2**：服务器区交换机  
+""")
 
     st.markdown("---")
-    st.markdown("### 系统能力")
-    st.write("✅ 自然语言意图理解")
-    st.write("✅ LangChain 智能体解析")
-    st.write("✅ 策略冲突检测")
-    st.write("✅ Ryu/OpenFlow 策略下发")
-    st.write("✅ Mininet 闭环验证")
-    st.write("✅ 执行报告生成")
+
+    st.markdown("## 演示案例")
+    if st.button("案例1：隔离异常主机", use_container_width=True):
+        st.session_state.default_intent = "隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器"
+
+    if st.button("案例2：访问控制", use_container_width=True):
+        st.session_state.default_intent = "禁止正常用户 h1 访问 Web服务器"
+
+    if st.button("案例3：冲突检测", use_container_width=True):
+        st.session_state.default_intent = "允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器"
 
 
-st.markdown('<div class="main-title">🛡️ NetIntent-Shield 智能网络意图编排与闭环验证系统</div>', unsafe_allow_html=True)
+st.markdown("""
+<div class="title-box">
+    <div class="main-title">🌐 NetIntent-Shield 智能网络管理系统</div>
+    <div class="sub-title">基于 LangChain 智能体、Ryu SDN 控制器与 Mininet 的网络意图编排与闭环验证平台</div>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="sub-title">基于 LangChain 智能体、Python、Ryu SDN 控制器与 Mininet，实现网络安全意图自动翻译、策略下发与闭环验证。</div>',
+    '<span class="status-pill">LangChain Agent</span>'
+    '<span class="status-pill">Ryu Controller</span>'
+    '<span class="status-pill">OpenFlow</span>'
+    '<span class="status-pill">Mininet Verification</span>',
     unsafe_allow_html=True
 )
 
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.markdown('<div class="small-card"><b>智能体层</b><br>LangChain Intent Agent</div>', unsafe_allow_html=True)
-
-with col2:
-    st.markdown('<div class="small-card"><b>控制层</b><br>Ryu Controller + OpenFlow</div>', unsafe_allow_html=True)
-
-with col3:
-    st.markdown('<div class="small-card"><b>验证层</b><br>Mininet + Ping Verification</div>', unsafe_allow_html=True)
+st.markdown("")
 
 
-st.markdown("### 🤖 智能网络管理助手")
+for item in st.session_state.history:
+    role = item["role"]
+    content = item["content"]
 
-examples = {
-    "案例1：隔离异常主机": "隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器",
-    "案例2：访问控制": "禁止正常用户 h1 访问 Web服务器",
-    "案例3：策略冲突检测": "允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器"
-}
+    if role == "user":
+        st.markdown(
+            f"""
+            <div class="chat-card user-msg">
+                <div class="section-label">👤 用户意图</div>
+                <div>{content}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-case = st.selectbox(
-    "选择演示案例",
-    list(examples.keys())
-)
+    elif role == "agent":
+        st.markdown(
+            f"""
+            <div class="chat-card agent-msg">
+                <div class="section-label">🤖 智能网络助手</div>
+                <div>{content}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-default_intent = examples[case]
+    elif role == "warning":
+        st.markdown(
+            f"""
+            <div class="chat-card warn-msg">
+                <div class="section-label">⚠️ 策略冲突检测</div>
+                <div>{content}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-user_input = st.text_area(
-    "请输入网络安全意图",
-    value=default_intent,
-    height=120,
+    elif role == "error":
+        st.markdown(
+            f"""
+            <div class="chat-card error-msg">
+                <div class="section-label">❌ 系统错误</div>
+                <div>{content}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+st.markdown('<div class="footer-input">', unsafe_allow_html=True)
+
+user_input = st.text_input(
+    "请输入您的网络管理指令",
+    value=st.session_state.default_intent,
     placeholder="例如：隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器"
 )
 
-run_button = st.button("🚀 执行意图编排", use_container_width=True)
+send = st.button("发送并执行", use_container_width=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 
-if run_button:
-    st.markdown("---")
+def build_agent_reply(rules, conflicts, apply_results):
+    lines = []
 
-    st.markdown('<div class="user-box"><b>用户意图：</b><br>{}</div>'.format(user_input), unsafe_allow_html=True)
+    lines.append("我已完成网络意图解析。")
+    lines.append("")
+    lines.append("**解析出的策略规则：**")
+    for rule in rules:
+        lines.append(f"- {rule['src']} → {rule['dst']}：{rule['action']}")
+
+    lines.append("")
+
+    if conflicts:
+        lines.append("**冲突检测结果：发现冲突。**")
+        for c in conflicts:
+            lines.append(f"- {c['src']} → {c['dst']} 同时存在 {c['actions']}")
+        lines.append("")
+        lines.append("为避免错误策略影响网络运行，本次策略未下发。")
+        return "\n".join(lines)
+
+    lines.append("**冲突检测结果：未发现冲突。**")
+    lines.append("")
+    lines.append("**策略下发结果：**")
+
+    for r in apply_results:
+        lines.append(f"- {r['src']} → {r['dst']}：{r['action']}，status={r['status']}")
+
+    lines.append("")
+    lines.append("**建议在 Mininet 中执行以下验证命令：**")
+
+    for rule in rules:
+        if rule["action"] == "deny":
+            lines.append(f"- {rule['src']} ping -c 3 {rule['dst']}，预期失败")
+        elif rule["action"] == "allow":
+            lines.append(f"- {rule['src']} ping -c 3 {rule['dst']}，预期成功")
+
+    return "\n".join(lines)
+
+
+if send and user_input.strip():
+    st.session_state.history.append({
+        "role": "user",
+        "content": user_input
+    })
 
     try:
-        st.markdown("### 1. LangChain 智能体解析")
-
         try:
             rules = agent_parse_intent(user_input)
-            st.markdown('<div class="agent-box"><b>LangChain Intent Agent：</b><br>已将自然语言意图解析为结构化网络策略。</div>', unsafe_allow_html=True)
+            parser_name = "LangChain Intent Agent"
         except Exception as llm_error:
-            st.warning("LLM Agent 调用失败，已切换到本地规则解析器")
-            st.write(str(llm_error))
             rules = parse_intent(user_input)
-
-        st.json(rules)
-
-        st.markdown("### 2. 策略冲突检测")
+            parser_name = "本地规则解析器"
 
         conflicts = check_conflicts(rules)
+        apply_results = []
 
-        if conflicts:
-            st.error("检测到策略冲突，系统拒绝下发策略。")
-            st.json(conflicts)
-
-            st.markdown("### 3. 执行报告")
-            st.markdown("""
-            <div class="card">
-            <b>执行结果：</b><br>
-            当前意图中存在互相矛盾的访问控制策略。为了避免错误流表影响网络运行，系统未将该策略下发到 Ryu 控制器。
-            </div>
-            """, unsafe_allow_html=True)
-
-        else:
-            st.success("未检测到策略冲突，可以继续下发。")
-
-            st.markdown("### 3. SDN 策略下发")
-
-            apply_results = []
-
+        if not conflicts:
             for rule in rules:
                 result = apply_rule(
                     rule["src"],
@@ -185,32 +315,19 @@ if run_button:
                 )
                 apply_results.append(result)
 
-            st.json(apply_results)
+        reply = build_agent_reply(rules, conflicts, apply_results)
+        reply = f"解析方式：**{parser_name}**\n\n" + reply
 
-            st.markdown("### 4. 闭环验证命令")
+        st.session_state.history.append({
+            "role": "agent",
+            "content": reply
+        })
 
-            verify_commands = []
-
-            for rule in rules:
-                if rule["action"] == "deny":
-                    cmd = rule["src"] + " ping -c 3 " + rule["dst"] + "    # expected: fail"
-                    verify_commands.append(cmd)
-                    st.code(cmd)
-                elif rule["action"] == "allow":
-                    cmd = rule["src"] + " ping -c 3 " + rule["dst"] + "    # expected: success"
-                    verify_commands.append(cmd)
-                    st.code(cmd)
-
-            st.markdown("### 5. 执行报告")
-
-            st.markdown("""
-            <div class="card">
-            <b>意图执行完成。</b><br><br>
-            系统已完成自然语言意图解析、结构化策略生成、策略冲突检测、Ryu/OpenFlow 流表下发，并生成 Mininet 验证命令。
-            请在 Mininet 终端执行上方验证命令，检查网络行为是否符合预期。
-            </div>
-            """, unsafe_allow_html=True)
+        st.rerun()
 
     except Exception as e:
-        st.error("系统执行失败")
-        st.write(str(e))
+        st.session_state.history.append({
+            "role": "error",
+            "content": str(e)
+        })
+        st.rerun()
