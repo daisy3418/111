@@ -1,0 +1,89 @@
+def parse_one(text):
+    text = text.strip().lower()
+
+    # 中文/英文角色映射
+    role_map = {
+        "正常用户": "h1",
+        "normal user": "h1",
+
+        "异常主机": "h2",
+        "攻击主机": "h2",
+        "疑似攻击主机": "h2",
+        "suspicious host": "h2",
+        "attacker": "h2",
+
+        "web服务器": "h3",
+        "web server": "h3",
+        "业务服务器": "h3",
+        "business server": "h3",
+
+        "数据库服务器": "h4",
+        "数据库": "h4",
+        "database server": "h4",
+        "database": "h4",
+    }
+
+    hosts = []
+
+    for h in ["h1", "h2", "h3", "h4"]:
+        if h in text and h not in hosts:
+            hosts.append(h)
+
+    for key, host in role_map.items():
+        if key in text and host not in hosts:
+            hosts.append(host)
+
+    if len(hosts) < 2:
+        raise ValueError("need two hosts, like h1 and h3")
+
+    src = hosts[0]
+
+    # 如果是“隔离异常主机”，但同时出现 h3 和 h4，由 parse_intent 单独处理
+    dst = hosts[1]
+
+    if "禁止" in text or "阻止" in text or "隔离" in text or "deny" in text or "block" in text or "drop" in text:
+        action = "deny"
+    elif "允许" in text or "allow" in text or "permit" in text:
+        action = "allow"
+    else:
+        raise ValueError("unknown action, use deny or allow")
+
+    return {
+        "src": src,
+        "dst": dst,
+        "action": action
+    }
+
+
+def parse_intent(text):
+    text = text.strip().lower()
+
+    # 专门处理：隔离异常主机访问 Web 和数据库
+    if ("隔离" in text or "isolate" in text) and ("异常主机" in text or "h2" in text):
+        rules = []
+
+        if "web" in text or "web服务器" in text or "业务服务器" in text or "h3" in text:
+            rules.append({
+                "src": "h2",
+                "dst": "h3",
+                "action": "deny"
+            })
+
+        if "数据库" in text or "database" in text or "h4" in text:
+            rules.append({
+                "src": "h2",
+                "dst": "h4",
+                "action": "deny"
+            })
+
+        if rules:
+            return rules
+
+    parts = text.split(" and ")
+    rules = []
+
+    for part in parts:
+        rule = parse_one(part)
+        rules.append(rule)
+
+    return rules
