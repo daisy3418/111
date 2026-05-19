@@ -1,161 +1,420 @@
-from agent.llm_agent import agent_parse_intent
-from agent.simple_parser import parse_intent
-from sdn.conflict_checker import check_conflicts
-from sdn.policy_apply import apply_rule
+import streamlit as st
+
+from agent.network_agent import run_network_agent
 
 
-def classify_task(user_text):
-    text = user_text.lower()
-
-    rollback_words = ["回滚", "撤销", "恢复", "清空", "还原"]
-    verify_words = ["验证", "测试", "检查是否生效", "怎么验证", "如何验证"]
-
-    configure_words = [
-        "配置", "策略", "访问", "禁止", "允许", "隔离", "保护",
-        "最小权限", "服务器区", "管理安全区", "数据库",
-        "web", "普通用户", "正常用户", "异常主机", "攻击主机",
-        "管理员", "监控", "h1", "h2", "h3", "h4", "h5", "h6",
-        "allow", "deny", "block", "isolate"
-    ]
-
-    for w in rollback_words:
-        if w in text:
-            return "rollback"
-
-    for w in verify_words:
-        if w in text:
-            return "verify"
-
-    for w in configure_words:
-        if w in text:
-            return "configure"
-
-    return "invalid"
+st.set_page_config(
+    page_title="NetIntent-Shield",
+    page_icon="🌐",
+    layout="wide"
+)
 
 
-def build_plan_from_rules(rules):
-    plan = []
+# =========================
+# 页面样式
+# =========================
+st.markdown(
+    """
+    <style>
+    .block-container {
+        padding-top: 1.4rem;
+        padding-bottom: 3rem;
+        max-width: 980px;
+    }
 
-    for rule in rules:
-        src = rule["src"]
-        dst = rule["dst"]
-        action = rule["action"]
+    [data-testid="stSidebar"] {
+        background-color: #f7f8fb;
+        border-right: 1px solid #e5e7eb;
+    }
 
-        if action == "deny":
-            plan.append("阻断 {} 到 {} 的访问流量".format(src, dst))
-        elif action == "allow":
-            plan.append("允许 {} 到 {} 的访问关系".format(src, dst))
-        else:
-            plan.append("处理 {} 到 {} 的未知动作 {}".format(src, dst, action))
+    .main-title {
+        text-align: center;
+        font-size: 32px;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
 
-    return plan
+    .sub-title {
+        text-align: center;
+        color: #6b7280;
+        font-size: 15px;
+        margin-bottom: 16px;
+    }
+
+    .system-card {
+        background-color: #f7f9fc;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 14px 18px;
+        margin-bottom: 18px;
+        color: #374151;
+        font-size: 14px;
+        line-height: 1.7;
+    }
+
+    .side-title {
+        font-size: 22px;
+        font-weight: 800;
+        margin-bottom: 2px;
+    }
+
+    .side-subtitle {
+        color: #6b7280;
+        font-size: 13px;
+        margin-bottom: 12px;
+    }
+
+    .ability-box {
+        background-color: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 12px;
+        font-size: 14px;
+        line-height: 1.75;
+    }
+
+    .history-title {
+        font-size: 14px;
+        font-weight: 700;
+        margin-top: 8px;
+        margin-bottom: 8px;
+    }
+
+    .empty-tip {
+        color: #6b7280;
+        font-size: 14px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 
-def build_verification_from_rules(rules):
-    verification = []
-
-    for rule in rules:
-        src = rule["src"]
-        dst = rule["dst"]
-        action = rule["action"]
-
-        if action == "deny":
-            verification.append({
-                "cmd": "{} ping -c 3 {}".format(src, dst),
-                "expected": "fail"
-            })
-        elif action == "allow":
-            verification.append({
-                "cmd": "{} ping -c 3 {}".format(src, dst),
-                "expected": "success"
-            })
-
-    return verification
-
-
-def run_network_agent(user_text):
-    task_type = classify_task(user_text)
-
-    if task_type == "invalid":
-        return {
-            "task_type": "invalid",
-            "summary": "我没有识别到有效的网络配置意图。请描述你希望配置的访问关系、安全域策略、隔离目标或验证目标。",
-            "plan": [],
-            "rules": [],
-            "conflicts": [],
-            "apply_results": [],
-            "verification": []
+# =========================
+# 多会话状态：模拟豆包/ChatGPT 左侧历史对话
+# =========================
+if "chats" not in st.session_state:
+    st.session_state.chats = {
+        "chat_1": {
+            "title": "新对话",
+            "messages": []
         }
+    }
 
-    if task_type == "verify":
-        return {
-            "task_type": "verify",
-            "summary": "这是一个验证类请求。请结合最近一次下发的策略，在 Mininet 中执行对应 ping 命令进行验证。当前版本会在每次配置后自动生成验证命令。",
-            "plan": ["根据最近一次策略生成验证命令", "在 Mininet 中执行 ping 测试", "对比预期结果"],
-            "rules": [],
-            "conflicts": [],
-            "apply_results": [],
-            "verification": []
-        }
+if "current_chat_id" not in st.session_state:
+    st.session_state.current_chat_id = "chat_1"
 
-    if task_type == "rollback":
-        return {
-            "task_type": "rollback",
-            "summary": "这是一个回滚类请求。当前版本暂未真正清除流表，下一步将接入 Ryu 流表清理接口实现配置回滚。",
-            "plan": ["识别回滚请求", "准备清理已下发策略", "恢复默认网络连通性"],
-            "rules": [],
-            "conflicts": [],
-            "apply_results": [],
-            "verification": []
-        }
+if "chat_counter" not in st.session_state:
+    st.session_state.chat_counter = 1
 
-    try:
-        try:
-            rules = agent_parse_intent(user_text)
-            parser_name = "LangChain 网络配置意图智能体"
-        except Exception:
-            rules = parse_intent(user_text)
-            parser_name = "本地规则解析器"
 
-        plan = build_plan_from_rules(rules)
-        conflicts = check_conflicts(rules)
+def get_current_chat():
+    return st.session_state.chats[st.session_state.current_chat_id]
 
-        apply_results = []
 
-        if not conflicts:
-            for rule in rules:
-                result = apply_rule(
+def new_chat():
+    st.session_state.chat_counter += 1
+    chat_id = "chat_" + str(st.session_state.chat_counter)
+    st.session_state.chats[chat_id] = {
+        "title": "新对话",
+        "messages": []
+    }
+    st.session_state.current_chat_id = chat_id
+
+
+def set_chat_title_if_needed(user_text):
+    chat = get_current_chat()
+    if chat["title"] == "新对话":
+        title = user_text.strip()
+        if len(title) > 16:
+            title = title[:16] + "..."
+        chat["title"] = title
+
+
+def add_message(role, content):
+    chat = get_current_chat()
+    chat["messages"].append({
+        "role": role,
+        "content": content
+    })
+
+
+# =========================
+# 把 network_agent 的结构化结果转成前端展示文本
+# =========================
+def format_agent_result(result):
+    lines = []
+
+    task_type = result.get("task_type", "unknown")
+    summary = result.get("summary", "")
+
+    lines.append("### 🧠 智能体任务识别")
+    lines.append("- 任务类型：`{}`".format(task_type))
+    lines.append("- 执行摘要：{}".format(summary))
+    lines.append("")
+
+    plan = result.get("plan", [])
+    if plan:
+        lines.append("### 1. 配置执行计划")
+        for i, step in enumerate(plan, start=1):
+            lines.append("{}. {}".format(i, step))
+        lines.append("")
+
+    rules = result.get("rules", [])
+    if rules:
+        lines.append("### 2. 结构化网络配置策略")
+        for rule in rules:
+            lines.append(
+                "- `{}` → `{}` ：`{}`".format(
                     rule["src"],
                     rule["dst"],
                     rule["action"]
                 )
-                apply_results.append(result)
+            )
+        lines.append("")
 
-        verification = build_verification_from_rules(rules)
+    conflicts = result.get("conflicts", [])
+    lines.append("### 3. 策略冲突检测")
 
-        if conflicts:
-            summary = "智能体已生成配置策略，但检测到策略冲突，因此未下发到网络。"
+    if conflicts:
+        lines.append("检测到策略冲突，系统拒绝下发配置。")
+        for c in conflicts:
+            lines.append(
+                "- `{}` → `{}` 存在冲突动作：`{}`".format(
+                    c["src"],
+                    c["dst"],
+                    c["actions"]
+                )
+            )
+        lines.append("")
+        lines.append("### 4. 智能体反馈")
+        lines.append(summary)
+        return "\n".join(lines)
+
+    if task_type == "configure":
+        lines.append("未检测到策略冲突。")
+    else:
+        lines.append("当前任务无需进行策略冲突检测。")
+    lines.append("")
+
+    apply_results = result.get("apply_results", [])
+    if apply_results:
+        lines.append("### 4. Ryu / OpenFlow 配置下发结果")
+        for r in apply_results:
+            lines.append(
+                "- `{}` → `{}` ：`{}`，dpid=`{}`，status=`{}`".format(
+                    r["src"],
+                    r["dst"],
+                    r["action"],
+                    r.get("dpid", "-"),
+                    r.get("status", "-")
+                )
+            )
+        lines.append("")
+
+    verification = result.get("verification", [])
+    if verification:
+        lines.append("### 5. Mininet 闭环验证命令")
+        for item in verification:
+            lines.append(
+                "- `{}`，预期：`{}`".format(
+                    item["cmd"],
+                    item["expected"]
+                )
+            )
+        lines.append("")
+
+    lines.append("### 6. 智能体反馈")
+    lines.append(summary)
+
+    return "\n".join(lines)
+
+
+def submit_intent(text):
+    set_chat_title_if_needed(text)
+
+    add_message("user", text)
+
+    with st.spinner("网络配置智能体正在理解意图、规划策略并执行配置..."):
+        result = run_network_agent(text)
+        reply = format_agent_result(result)
+
+    add_message("assistant", reply)
+
+
+# =========================
+# 左侧侧栏
+# =========================
+with st.sidebar:
+    st.markdown(
+        '<div class="side-title">🌐 NetIntent-Shield</div>',
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        '<div class="side-subtitle">AI-SDN 网络配置智能体</div>',
+        unsafe_allow_html=True
+    )
+
+    if st.button("➕ 开启新对话", use_container_width=True):
+        new_chat()
+        st.rerun()
+
+    st.caption("新对话会清空当前页面上下文，但不会自动回滚已经下发到网络中的配置。")
+
+    st.divider()
+
+    st.markdown('<div class="history-title">历史对话</div>', unsafe_allow_html=True)
+
+    chat_items = list(st.session_state.chats.items())
+    chat_items.reverse()
+
+    for chat_id, chat_data in chat_items:
+        label = chat_data["title"]
+
+        if chat_id == st.session_state.current_chat_id:
+            label = "● " + label
         else:
-            summary = "智能体已完成配置意图解析、策略编排、冲突检测和 Ryu/OpenFlow 下发。"
+            label = "○ " + label
 
-        return {
-            "task_type": "configure",
-            "parser": parser_name,
-            "summary": summary,
-            "plan": plan,
-            "rules": rules,
-            "conflicts": conflicts,
-            "apply_results": apply_results,
-            "verification": verification
-        }
+        if st.button(label, key="history_" + chat_id, use_container_width=True):
+            st.session_state.current_chat_id = chat_id
+            st.rerun()
 
-    except Exception as e:
-        return {
-            "task_type": "error",
-            "summary": "系统执行失败：{}".format(str(e)),
-            "plan": [],
-            "rules": [],
-            "conflicts": [],
-            "apply_results": [],
-            "verification": []
-        }
+    st.divider()
+
+    st.markdown("### 🧠 能力说明")
+    st.markdown(
+        """
+        <div class="ability-box">
+        ✅ 自然语言网络配置意图理解<br>
+        ✅ 智能体任务识别<br>
+        ✅ 配置执行计划生成<br>
+        ✅ 主机级访问控制配置<br>
+        ✅ 安全域策略编排<br>
+        ✅ 最小权限策略自动生成<br>
+        ✅ 策略冲突检测<br>
+        ✅ Ryu / OpenFlow 配置下发<br>
+        ✅ Mininet 闭环验证命令生成<br>
+        ✅ 执行报告输出
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.divider()
+
+    st.markdown("### 🌐 当前拓扑")
+    st.code("""
+Ryu Controller
+      |
+controls s1, s2, s3
+
+h1 ----\\
+h2 ----- s1 ----- s2 ----- h3
+        |        |
+        |        h4
+        |
+        s3 ----- h5
+         |
+         h6
+""")
+
+    st.markdown("### 🖥️ 主机角色")
+    st.markdown("""
+**h1**：正常用户，办公区  
+**h2**：异常主机 / 疑似攻击主机，办公区  
+**h3**：Web服务器 / 业务服务器，服务器区  
+**h4**：数据库服务器，服务器区  
+**h5**：管理员主机，管理安全区  
+**h6**：监控审计主机，管理安全区  
+
+**s1**：办公网核心交换机  
+**s2**：服务器区交换机  
+**s3**：管理安全区交换机  
+""")
+
+    st.divider()
+
+    st.markdown("### 🚀 演示案例")
+
+    if st.button("服务器区保护策略", use_container_width=True):
+        submit_intent("配置服务器区保护策略")
+        st.rerun()
+
+    if st.button("最小权限策略", use_container_width=True):
+        submit_intent("按照最小权限原则配置当前内网")
+        st.rerun()
+
+    if st.button("管理安全区保护", use_container_width=True):
+        submit_intent("保护管理安全区，禁止异常主机访问管理员主机和监控审计主机")
+        st.rerun()
+
+    if st.button("普通用户数据库隔离", use_container_width=True):
+        submit_intent("普通用户只能访问 Web服务器，不能直接访问数据库")
+        st.rerun()
+
+    if st.button("策略冲突检测", use_container_width=True):
+        submit_intent("允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器")
+        st.rerun()
+
+
+# =========================
+# 主页面
+# =========================
+st.markdown(
+    """
+    <div class="main-title">🌐 NetIntent-Shield 网络配置智能体</div>
+    <div class="sub-title">
+    基于 LangChain 智能体、Ryu SDN 控制器与 Mininet 的网络配置意图编排与闭环验证系统
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
+    <div class="system-card">
+    <b>系统定位：</b>
+    面向企业内网场景，支持访问控制、安全域策略、自动化策略编排、
+    策略冲突检测、配置下发与验证。用户可以像对话一样输入网络配置意图，
+    系统通过智能体进行任务识别、策略规划、配置下发和执行反馈。
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+
+current_chat = get_current_chat()
+messages = current_chat["messages"]
+
+if not messages:
+    with st.chat_message("assistant"):
+        st.markdown("""
+你好，我是 **NetIntent-Shield 网络配置智能体**。
+
+你可以直接输入网络配置意图，例如：
+
+- 配置服务器区保护策略
+- 按照最小权限原则配置当前内网
+- 保护管理安全区，禁止异常主机访问管理员主机和监控审计主机
+- 普通用户只能访问 Web服务器，不能直接访问数据库
+- 允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器
+- 如何验证异常主机已经被隔离？
+- 撤销刚才的配置
+
+我会自动完成：
+
+**任务识别 → 配置计划 → 策略编排 → 冲突检测 → Ryu/OpenFlow 下发 → Mininet 验证反馈**
+""")
+
+
+for msg in messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+
+prompt = st.chat_input("请输入您的网络配置意图...")
+
+if prompt:
+    submit_intent(prompt)
+    st.rerun()
