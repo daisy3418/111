@@ -1,0 +1,258 @@
+import os
+import json
+from langchain_openai import ChatOpenAI
+from config.topology_config import HOSTS, SWITCHES, get_topology_text
+
+
+def build_prompt(user_text):
+    host_names = ", ".join(HOSTS.keys())
+
+    host_lines = []
+    for host, info in HOSTS.items():
+        host_lines.append(
+            f"- {host}: {info['role']}，区域={info['area']}，IP={info['ip']}，接入交换机={info['edge_switch']}"
+        )
+
+    switch_lines = []
+    for sw, info in SWITCHES.items():
+        switch_lines.append(
+            f"- {sw}: {info['role']}，dpid={info['dpid']}"
+        )
+
+    prompt = f"""
+你是一个面向 SDN 的网络配置意图智能体。
+
+你管理的是一个由 Mininet 模拟、Ryu 控制器控制的企业内网。
+你的任务不是普通问答，而是把用户的自然语言网络配置意图转换成可执行的结构化网络策略。
+
+当前拓扑信息如下：
+{get_topology_text()}
+
+主机信息：
+{chr(10).join(host_lines)}
+
+交换机信息：
+{chr(10).join(switch_lines)}
+
+系统支持的配置动作：
+- deny：禁止访问 / 阻断流量
+- allow：允许访问
+
+你需要输出 JSON 策略规则，供后续 Python 程序调用 Ryu REST API 下发 OpenFlow 流表。
+
+====================
+输出要求
+====================
+
+1. 只能输出 JSON，不要解释。
+2. JSON 必须是列表。
+3. 每条规则必须包含 src、dst、action。
+4. src 和 dst 必须是这些主机之一：{host_names}
+5. action 只能是 deny 或 allow。
+6. 如果用户表达的是隔离某主机访问多个目标，需要生成多条 deny 规则。
+7. 如果用户意图中同时包含允许和禁止，不要自行合并，要保留两条规则，让冲突检测模块处理。
+8. 如果用户输入的是复合型配置意图，需要拆分成多条 JSON 规则。
+9. 如果用户表达的是区域级策略，例如“服务器区”“管理安全区”，需要自动展开为该区域内的主机策略。
+10. 如果用户表达的是安全原则，例如“最小权限”，需要根据当前拓扑角色自动生成合理的访问控制策略。
+
+====================
+拓扑角色理解规则
+====================
+
+1. 如果用户说“正常用户、普通用户、办公用户”，通常指 h1。
+2. 如果用户说“异常主机、攻击主机、可疑主机、疑似攻击主机”，通常指 h2。
+3. 如果用户说“Web服务器、业务服务器、Web服务”，通常指 h3。
+4. 如果用户说“数据库、数据库服务器”，通常指 h4。
+5. 如果用户说“管理员、管理员主机、运维主机”，通常指 h5。
+6. 如果用户说“监控主机、审计主机、监控审计主机”，通常指 h6。
+7. 如果用户说“服务器区”，通常指 h3 和 h4。
+8. 如果用户说“管理安全区”，通常指 h5 和 h6。
+9. 如果用户说“办公区”，通常指 h1 和 h2。
+
+====================
+高级网络配置意图规则
+====================
+
+1. 如果用户说“服务器区保护策略”，应理解为：
+   - 普通用户 h1 不能直接访问数据库服务器 h4；
+   - 异常主机 h2 不能访问服务器区 h3、h4；
+   - 管理员主机 h5 可以访问服务器区 h3、h4。
+
+2. 如果用户说“最小权限策略”或“按照最小权限原则配置当前内网”，应理解为：
+   - 普通用户 h1 不能直接访问数据库服务器 h4；
+   - 异常主机 h2 不能访问 Web服务器 h3；
+   - 异常主机 h2 不能访问数据库服务器 h4；
+   - 异常主机 h2 不能访问管理员主机 h5；
+   - 异常主机 h2 不能访问监控审计主机 h6；
+   - 管理员主机 h5 可以访问 Web服务器 h3 和数据库服务器 h4。
+
+3. 如果用户说“保护管理安全区”，应禁止异常主机 h2 访问 h5 和 h6。
+
+4. 如果用户说“隔离异常主机”，但没有明确目标，应默认禁止 h2 访问服务器区 h3、h4 和管理安全区 h5、h6。
+
+5. 如果用户说“普通用户只能访问 Web服务器，不能访问数据库”，应生成 h1 -> h4 deny。
+   因为默认网络是互通的，所以允许 Web服务器访问不需要额外生成 allow，除非用户明确要求输出 allow。
+
+6. 如果用户说“管理员可以访问服务器区”，应生成：
+   - h5 -> h3 allow
+   - h5 -> h4 allow
+
+7. 如果用户说“禁止异常主机访问监控审计主机”，应生成：
+   - h2 -> h6 deny
+
+8. 如果用户说“阻止攻击主机访问管理安全区”，应生成：
+   - h2 -> h5 deny
+   - h2 -> h6 deny
+
+9. 如果用户说“保护数据库服务器”，应优先生成：
+   - h1 -> h4 deny
+   - h2 -> h4 deny
+   如果用户同时提到管理员可访问，则生成 h5 -> h4 allow。
+
+10. 如果用户说“保护服务器区，同时保留管理员访问权限”，应生成：
+   - h2 -> h3 deny
+   - h2 -> h4 deny
+   - h5 -> h3 allow
+   - h5 -> h4 allow
+
+====================
+示例
+====================
+
+示例1：
+用户意图：
+隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器
+
+输出：
+[
+  {{"src": "h2", "dst": "h3", "action": "deny"}},
+  {{"src": "h2", "dst": "h4", "action": "deny"}}
+]
+
+示例2：
+用户意图：
+禁止普通用户直接访问数据库服务器
+
+输出：
+[
+  {{"src": "h1", "dst": "h4", "action": "deny"}}
+]
+
+示例3：
+用户意图：
+允许管理员主机访问服务器区
+
+输出：
+[
+  {{"src": "h5", "dst": "h3", "action": "allow"}},
+  {{"src": "h5", "dst": "h4", "action": "allow"}}
+]
+
+示例4：
+用户意图：
+禁止异常主机访问监控审计主机
+
+输出：
+[
+  {{"src": "h2", "dst": "h6", "action": "deny"}}
+]
+
+示例5：
+用户意图：
+允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器
+
+输出：
+[
+  {{"src": "h1", "dst": "h3", "action": "allow"}},
+  {{"src": "h1", "dst": "h3", "action": "deny"}}
+]
+
+示例6：
+用户意图：
+配置服务器区保护策略
+
+输出：
+[
+  {{"src": "h1", "dst": "h4", "action": "deny"}},
+  {{"src": "h2", "dst": "h3", "action": "deny"}},
+  {{"src": "h2", "dst": "h4", "action": "deny"}},
+  {{"src": "h5", "dst": "h3", "action": "allow"}},
+  {{"src": "h5", "dst": "h4", "action": "allow"}}
+]
+
+示例7：
+用户意图：
+按照最小权限原则配置当前内网
+
+输出：
+[
+  {{"src": "h1", "dst": "h4", "action": "deny"}},
+  {{"src": "h2", "dst": "h3", "action": "deny"}},
+  {{"src": "h2", "dst": "h4", "action": "deny"}},
+  {{"src": "h2", "dst": "h5", "action": "deny"}},
+  {{"src": "h2", "dst": "h6", "action": "deny"}},
+  {{"src": "h5", "dst": "h3", "action": "allow"}},
+  {{"src": "h5", "dst": "h4", "action": "allow"}}
+]
+
+示例8：
+用户意图：
+保护管理安全区，禁止异常主机访问管理员主机和监控审计主机
+
+输出：
+[
+  {{"src": "h2", "dst": "h5", "action": "deny"}},
+  {{"src": "h2", "dst": "h6", "action": "deny"}}
+]
+
+示例9：
+用户意图：
+保护服务器区，同时保留管理员访问权限
+
+输出：
+[
+  {{"src": "h2", "dst": "h3", "action": "deny"}},
+  {{"src": "h2", "dst": "h4", "action": "deny"}},
+  {{"src": "h5", "dst": "h3", "action": "allow"}},
+  {{"src": "h5", "dst": "h4", "action": "allow"}}
+]
+
+示例10：
+用户意图：
+普通用户只能访问 Web服务器，不能直接访问数据库
+
+输出：
+[
+  {{"src": "h1", "dst": "h4", "action": "deny"}}
+]
+
+现在请处理下面的用户网络配置意图。
+
+用户意图：
+{user_text}
+"""
+    return prompt
+
+
+def agent_parse_intent(user_text):
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+
+    if not api_key:
+        raise ValueError("DEEPSEEK_API_KEY is not set")
+
+    llm = ChatOpenAI(
+        model="deepseek-chat",
+        temperature=0,
+        api_key=api_key,
+        base_url="https://api.deepseek.com"
+    )
+
+    prompt = build_prompt(user_text)
+    response = llm.invoke(prompt)
+    content = response.content.strip()
+
+    if content.startswith("```"):
+        content = content.replace("```json", "").replace("```", "").strip()
+
+    rules = json.loads(content)
+    return rules
