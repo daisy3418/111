@@ -1,20 +1,279 @@
+import streamlit as st
+
 from agent.llm_agent import agent_parse_intent
+from agent.simple_parser import parse_intent
+from sdn.conflict_checker import check_conflicts
+from sdn.policy_apply import apply_rule
 
 
-tests = [
-    "配置服务器区保护策略",
-    "按照最小权限原则配置当前内网",
-    "保护管理安全区，禁止异常主机访问管理员主机和监控审计主机",
-    "保护服务器区，同时保留管理员访问权限",
-    "普通用户只能访问 Web服务器，不能直接访问数据库",
-]
+st.set_page_config(
+    page_title="NetIntent-Shield",
+    page_icon="🌐",
+    layout="wide"
+)
 
-for text in tests:
-    print("User intent:")
-    print(text)
 
-    rules = agent_parse_intent(text)
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    print("LLM parsed rules:")
-    print(rules)
-    print("-" * 50)
+
+def execute_intent(user_text):
+    lines = []
+
+    try:
+        try:
+            rules = agent_parse_intent(user_text)
+            parser_name = "LangChain 网络配置意图智能体"
+        except Exception as llm_error:
+            rules = parse_intent(user_text)
+            parser_name = "本地规则解析器"
+
+        lines.append("### 🤖 解析方式")
+        lines.append(parser_name)
+        lines.append("")
+
+        lines.append("### 1. 网络配置意图解析结果")
+        lines.append("系统已将自然语言配置意图转换为结构化策略规则：")
+        lines.append("")
+
+        for rule in rules:
+            lines.append(
+                "- `{}` → `{}` ：`{}`".format(
+                    rule["src"],
+                    rule["dst"],
+                    rule["action"]
+                )
+            )
+
+        lines.append("")
+
+        conflicts = check_conflicts(rules)
+
+        lines.append("### 2. 策略冲突检测")
+
+        if conflicts:
+            lines.append("检测到策略冲突，系统拒绝下发配置。")
+            lines.append("")
+
+            for c in conflicts:
+                lines.append(
+                    "- `{}` → `{}` 同时存在 `{}`".format(
+                        c["src"],
+                        c["dst"],
+                        c["actions"]
+                    )
+                )
+
+            lines.append("")
+            lines.append("### 3. 执行结论")
+            lines.append(
+                "为了避免错误 OpenFlow 流表影响网络运行，本次配置未下发到 Ryu 控制器。"
+            )
+
+            return "\n".join(lines)
+
+        lines.append("未检测到策略冲突，可以继续下发网络配置。")
+        lines.append("")
+
+        apply_results = []
+
+        for rule in rules:
+            result = apply_rule(
+                rule["src"],
+                rule["dst"],
+                rule["action"]
+            )
+            apply_results.append(result)
+
+        lines.append("### 3. SDN / Ryu 配置下发结果")
+
+        for r in apply_results:
+            lines.append(
+                "- `{}` → `{}` ：`{}`，dpid=`{}`，status=`{}`".format(
+                    r["src"],
+                    r["dst"],
+                    r["action"],
+                    r.get("dpid", "-"),
+                    r["status"]
+                )
+            )
+
+        lines.append("")
+
+        lines.append("### 4. Mininet 闭环验证命令")
+
+        for rule in rules:
+            if rule["action"] == "deny":
+                cmd = "{} ping -c 3 {}".format(rule["src"], rule["dst"])
+                lines.append("- `{}`，预期：失败".format(cmd))
+            elif rule["action"] == "allow":
+                cmd = "{} ping -c 3 {}".format(rule["src"], rule["dst"])
+                lines.append("- `{}`，预期：成功".format(cmd))
+
+        lines.append("")
+        lines.append("### 5. 执行报告")
+        lines.append(
+            "系统已完成：自然语言配置意图解析 → 策略生成 → 冲突检测 → "
+            "Ryu/OpenFlow 配置下发 → Mininet 验证命令生成。"
+        )
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return "系统执行失败：{}".format(str(e))
+
+
+def submit_intent(text):
+    st.session_state.messages.append({
+        "role": "user",
+        "content": text
+    })
+
+    with st.spinner("智能体正在解析并执行网络配置意图..."):
+        reply = execute_intent(text)
+
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": reply
+    })
+
+
+with st.sidebar:
+    st.markdown("## ⚙️ 设置")
+
+    if st.button("🧹 清除对话历史", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+    st.divider()
+
+    st.markdown("## 🧠 系统能力")
+    st.markdown("""
+- 自然语言网络配置意图理解
+- 主机级访问控制配置
+- 安全域策略编排
+- 最小权限策略自动生成
+- 策略冲突检测
+- Ryu / OpenFlow 配置下发
+- Mininet 闭环验证
+- 执行报告生成
+""")
+
+    st.divider()
+
+    st.markdown("## 🌐 当前拓扑")
+
+    st.code("""
+Ryu Controller
+      |
+controls s1, s2, s3
+
+h1 ----\\
+h2 ----- s1 ----- s2 ----- h3
+        |        |
+        |        h4
+        |
+        s3 ----- h5
+         |
+         h6
+""")
+
+    st.markdown("## 🖥️ 主机角色")
+    st.markdown("""
+**h1**：正常用户，办公区  
+**h2**：异常主机 / 疑似攻击主机，办公区  
+**h3**：Web服务器 / 业务服务器，服务器区  
+**h4**：数据库服务器，服务器区  
+**h5**：管理员主机，管理安全区  
+**h6**：监控审计主机，管理安全区  
+
+**s1**：办公网核心交换机  
+**s2**：服务器区交换机  
+**s3**：管理安全区交换机  
+""")
+
+    st.divider()
+
+    st.markdown("## 🚀 演示案例")
+
+    if st.button("案例1：服务器区保护策略", use_container_width=True):
+        submit_intent("配置服务器区保护策略")
+        st.rerun()
+
+    if st.button("案例2：最小权限策略", use_container_width=True):
+        submit_intent("按照最小权限原则配置当前内网")
+        st.rerun()
+
+    if st.button("案例3：管理安全区保护", use_container_width=True):
+        submit_intent("保护管理安全区，禁止异常主机访问管理员主机和监控审计主机")
+        st.rerun()
+
+    if st.button("案例4：普通用户数据库隔离", use_container_width=True):
+        submit_intent("普通用户只能访问 Web服务器，不能直接访问数据库")
+        st.rerun()
+
+    if st.button("案例5：策略冲突检测", use_container_width=True):
+        submit_intent("允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器")
+        st.rerun()
+
+
+st.markdown(
+    """
+    <div style="text-align:center; margin-top:20px; margin-bottom:15px;">
+        <h1>🌐 NetIntent-Shield 网络配置智能体</h1>
+        <p style="color:gray; font-size:16px;">
+        基于 LangChain 智能体、Ryu SDN 控制器与 Mininet 的网络配置意图编排与闭环验证系统
+        </p >
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
+    <div style="
+        background-color:#f7f9fc;
+        border:1px solid #e5e7eb;
+        padding:14px 18px;
+        border-radius:14px;
+        margin-bottom:18px;">
+        <b>系统定位：</b>
+        面向企业内网场景，支持访问控制、安全域策略、自动化策略编排、
+        策略冲突检测、配置下发与验证。
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.divider()
+
+
+if not st.session_state.messages:
+    with st.chat_message("assistant"):
+        st.markdown("""
+你好，我是 **NetIntent-Shield 网络配置智能体**。
+
+你可以直接输入网络配置意图，例如：
+
+- 配置服务器区保护策略
+- 按照最小权限原则配置当前内网
+- 保护管理安全区，禁止异常主机访问管理员主机和监控审计主机
+- 普通用户只能访问 Web服务器，不能直接访问数据库
+- 允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器
+
+我会自动完成：
+
+**意图理解 → 策略编排 → 冲突检测 → Ryu/OpenFlow 下发 → Mininet 验证命令生成**
+""")
+
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+
+prompt = st.chat_input("请输入您的网络配置意图...")
+
+if prompt:
+    submit_intent(prompt)
+    st.rerun()
