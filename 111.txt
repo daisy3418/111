@@ -1,0 +1,216 @@
+import streamlit as st
+
+from agent.llm_agent import agent_parse_intent
+from agent.simple_parser import parse_intent
+from sdn.conflict_checker import check_conflicts
+from sdn.policy_apply import apply_rule
+
+
+st.set_page_config(
+    page_title="NetIntent-Shield",
+    page_icon="🛡️",
+    layout="wide"
+)
+
+
+st.markdown("""
+<style>
+.main-title {
+    font-size: 34px;
+    font-weight: 800;
+    margin-bottom: 5px;
+}
+.sub-title {
+    font-size: 16px;
+    color: #666;
+    margin-bottom: 25px;
+}
+.card {
+    background-color: #f8f9fb;
+    padding: 18px;
+    border-radius: 14px;
+    border: 1px solid #e6e8ef;
+    margin-bottom: 15px;
+}
+.small-card {
+    background-color: #ffffff;
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid #e6e8ef;
+    margin-bottom: 10px;
+}
+.agent-box {
+    background-color: #f2f6ff;
+    padding: 18px;
+    border-radius: 14px;
+    border-left: 5px solid #3b82f6;
+    margin-bottom: 15px;
+}
+.user-box {
+    background-color: #f7f7f7;
+    padding: 16px;
+    border-radius: 14px;
+    border-left: 5px solid #10b981;
+    margin-bottom: 15px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+with st.sidebar:
+    st.markdown("## 🛡️ NetIntent-Shield")
+    st.caption("AI-SDN 智能网络意图编排系统")
+
+    st.markdown("---")
+    st.markdown("### 当前拓扑")
+
+    st.code("""
+Ryu Controller
+      |
+ controls s1, s2
+
+h1 ---- s1 ---- s2 ---- h3
+        |       |
+        h2      h4
+""")
+
+    st.markdown("### 主机角色")
+    st.write("**h1**：正常用户")
+    st.write("**h2**：异常主机 / 疑似攻击主机")
+    st.write("**h3**：Web服务器 / 业务服务器")
+    st.write("**h4**：数据库服务器")
+    st.write("**s1**：办公网交换机")
+    st.write("**s2**：服务器区交换机")
+
+    st.markdown("---")
+    st.markdown("### 系统能力")
+    st.write("✅ 自然语言意图理解")
+    st.write("✅ LangChain 智能体解析")
+    st.write("✅ 策略冲突检测")
+    st.write("✅ Ryu/OpenFlow 策略下发")
+    st.write("✅ Mininet 闭环验证")
+    st.write("✅ 执行报告生成")
+
+
+st.markdown('<div class="main-title">🛡️ NetIntent-Shield 智能网络意图编排与闭环验证系统</div>', unsafe_allow_html=True)
+
+st.markdown(
+    '<div class="sub-title">基于 LangChain 智能体、Python、Ryu SDN 控制器与 Mininet，实现网络安全意图自动翻译、策略下发与闭环验证。</div>',
+    unsafe_allow_html=True
+)
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown('<div class="small-card"><b>智能体层</b><br>LangChain Intent Agent</div>', unsafe_allow_html=True)
+
+with col2:
+    st.markdown('<div class="small-card"><b>控制层</b><br>Ryu Controller + OpenFlow</div>', unsafe_allow_html=True)
+
+with col3:
+    st.markdown('<div class="small-card"><b>验证层</b><br>Mininet + Ping Verification</div>', unsafe_allow_html=True)
+
+
+st.markdown("### 🤖 智能网络管理助手")
+
+examples = {
+    "案例1：隔离异常主机": "隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器",
+    "案例2：访问控制": "禁止正常用户 h1 访问 Web服务器",
+    "案例3：策略冲突检测": "允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器"
+}
+
+case = st.selectbox(
+    "选择演示案例",
+    list(examples.keys())
+)
+
+default_intent = examples[case]
+
+user_input = st.text_area(
+    "请输入网络安全意图",
+    value=default_intent,
+    height=120,
+    placeholder="例如：隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器"
+)
+
+run_button = st.button("🚀 执行意图编排", use_container_width=True)
+
+
+if run_button:
+    st.markdown("---")
+
+    st.markdown('<div class="user-box"><b>用户意图：</b><br>{}</div>'.format(user_input), unsafe_allow_html=True)
+
+    try:
+        st.markdown("### 1. LangChain 智能体解析")
+
+        try:
+            rules = agent_parse_intent(user_input)
+            st.markdown('<div class="agent-box"><b>LangChain Intent Agent：</b><br>已将自然语言意图解析为结构化网络策略。</div>', unsafe_allow_html=True)
+        except Exception as llm_error:
+            st.warning("LLM Agent 调用失败，已切换到本地规则解析器")
+            st.write(str(llm_error))
+            rules = parse_intent(user_input)
+
+        st.json(rules)
+
+        st.markdown("### 2. 策略冲突检测")
+
+        conflicts = check_conflicts(rules)
+
+        if conflicts:
+            st.error("检测到策略冲突，系统拒绝下发策略。")
+            st.json(conflicts)
+
+            st.markdown("### 3. 执行报告")
+            st.markdown("""
+            <div class="card">
+            <b>执行结果：</b><br>
+            当前意图中存在互相矛盾的访问控制策略。为了避免错误流表影响网络运行，系统未将该策略下发到 Ryu 控制器。
+            </div>
+            """, unsafe_allow_html=True)
+
+        else:
+            st.success("未检测到策略冲突，可以继续下发。")
+
+            st.markdown("### 3. SDN 策略下发")
+
+            apply_results = []
+
+            for rule in rules:
+                result = apply_rule(
+                    rule["src"],
+                    rule["dst"],
+                    rule["action"]
+                )
+                apply_results.append(result)
+
+            st.json(apply_results)
+
+            st.markdown("### 4. 闭环验证命令")
+
+            verify_commands = []
+
+            for rule in rules:
+                if rule["action"] == "deny":
+                    cmd = rule["src"] + " ping -c 3 " + rule["dst"] + "    # expected: fail"
+                    verify_commands.append(cmd)
+                    st.code(cmd)
+                elif rule["action"] == "allow":
+                    cmd = rule["src"] + " ping -c 3 " + rule["dst"] + "    # expected: success"
+                    verify_commands.append(cmd)
+                    st.code(cmd)
+
+            st.markdown("### 5. 执行报告")
+
+            st.markdown("""
+            <div class="card">
+            <b>意图执行完成。</b><br><br>
+            系统已完成自然语言意图解析、结构化策略生成、策略冲突检测、Ryu/OpenFlow 流表下发，并生成 Mininet 验证命令。
+            请在 Mininet 终端执行上方验证命令，检查网络行为是否符合预期。
+            </div>
+            """, unsafe_allow_html=True)
+
+    except Exception as e:
+        st.error("系统执行失败")
+        st.write(str(e))
