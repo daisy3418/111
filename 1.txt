@@ -1,0 +1,209 @@
+import streamlit as st
+
+from agent.llm_agent import agent_parse_intent
+from agent.simple_parser import parse_intent
+from sdn.conflict_checker import check_conflicts
+from sdn.policy_apply import apply_rule
+
+
+st.set_page_config(
+    page_title="NetIntent-Shield",
+    page_icon="🌐",
+    layout="wide"
+)
+
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+
+def execute_intent(user_text):
+    lines = []
+
+    try:
+        try:
+            rules = agent_parse_intent(user_text)
+            parser_name = "LangChain Intent Agent"
+        except Exception as llm_error:
+            rules = parse_intent(user_text)
+            parser_name = "本地规则解析器"
+
+        lines.append(f"### 🤖 解析方式\n{parser_name}\n")
+
+        lines.append("### 1. AI 解析出的结构化策略")
+        for rule in rules:
+            lines.append(f"- `{rule['src']} -> {rule['dst']} : {rule['action']}`")
+        lines.append("")
+
+        conflicts = check_conflicts(rules)
+
+        lines.append("### 2. 策略冲突检测")
+
+        if conflicts:
+            lines.append("检测到策略冲突，系统拒绝下发策略。")
+            for c in conflicts:
+                lines.append(
+                    f"- `{c['src']} -> {c['dst']}` 同时存在 `{c['actions']}`"
+                )
+
+            lines.append("")
+            lines.append("### 3. 执行结论")
+            lines.append("为了避免错误流表影响网络运行，本次策略未下发。")
+            return "\n".join(lines)
+
+        lines.append("未检测到冲突，可以继续下发策略。\n")
+
+        apply_results = []
+        for rule in rules:
+            result = apply_rule(
+                rule["src"],
+                rule["dst"],
+                rule["action"]
+            )
+            apply_results.append(result)
+
+        lines.append("### 3. SDN / Ryu 策略下发结果")
+        for r in apply_results:
+            lines.append(
+                f"- `{r['src']} -> {r['dst']} : {r['action']}`，status = `{r['status']}`"
+            )
+        lines.append("")
+
+        lines.append("### 4. Mininet 闭环验证命令")
+        for rule in rules:
+            if rule["action"] == "deny":
+                cmd = f"{rule['src']} ping -c 3 {rule['dst']}"
+                lines.append(f"- `{cmd}`，预期：失败")
+            elif rule["action"] == "allow":
+                cmd = f"{rule['src']} ping -c 3 {rule['dst']}"
+                lines.append(f"- `{cmd}`，预期：成功")
+
+        lines.append("")
+        lines.append("### 5. 执行报告")
+        lines.append(
+            "系统已完成自然语言意图解析、策略生成、冲突检测、Ryu/OpenFlow 流表下发，并生成验证命令。"
+        )
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"系统执行失败：{str(e)}"
+
+
+def submit_intent(text):
+    st.session_state.messages.append({
+        "role": "user",
+        "content": text
+    })
+
+    with st.spinner("智能体正在解析并执行网络意图..."):
+        reply = execute_intent(text)
+
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": reply
+    })
+
+
+with st.sidebar:
+    st.markdown("## 设置")
+
+    if st.button("🧹 清除对话历史", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+    st.divider()
+
+    st.markdown("## 能力说明")
+    st.markdown("""
+- 查询当前网络拓扑和设备角色
+- 理解自然语言网络安全意图
+- 生成结构化访问控制策略
+- 检测策略冲突
+- 调用 Ryu 下发 OpenFlow 流表
+- 生成 Mininet 验证命令
+- 输出闭环验证报告
+""")
+
+    st.divider()
+
+    st.markdown("## 当前拓扑")
+    st.code("""
+Ryu Controller
+      |
+ controls s1, s2
+
+h1 ---- s1 ---- s2 ---- h3
+        |       |
+        h2      h4
+""")
+
+    st.markdown("## 主机角色")
+    st.markdown("""
+**h1**：正常用户  
+**h2**：异常主机 / 疑似攻击主机  
+**h3**：Web服务器 / 业务服务器  
+**h4**：数据库服务器  
+**s1**：办公网交换机  
+**s2**：服务器区交换机  
+""")
+
+    st.divider()
+
+    st.markdown("## 演示案例")
+
+    if st.button("案例1：隔离异常主机", use_container_width=True):
+        submit_intent("隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器")
+        st.rerun()
+
+    if st.button("案例2：访问控制", use_container_width=True):
+        submit_intent("禁止正常用户 h1 访问 Web服务器")
+        st.rerun()
+
+    if st.button("案例3：冲突检测", use_container_width=True):
+        submit_intent("允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器")
+        st.rerun()
+
+
+st.markdown(
+    """
+    <div style="text-align:center; margin-top:20px; margin-bottom:20px;">
+        <h1>🌐 NetIntent-Shield 智能网络管理系统</h1>
+        <p style="color:gray; font-size:16px;">
+        基于 LangChain 智能体、Ryu SDN 控制器与 Mininet 的网络意图编排与闭环验证平台
+        </p >
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.divider()
+
+
+if not st.session_state.messages:
+    with st.chat_message("assistant"):
+        st.markdown("""
+你好，我是 **NetIntent-Shield 智能网络管理助手**。
+
+你可以直接输入网络安全意图，例如：
+
+- 隔离异常主机 h2，禁止它访问 Web服务器和数据库服务器
+- 禁止正常用户 h1 访问 Web服务器
+- 允许 h1 访问 Web服务器，同时禁止 h1 访问 Web服务器
+
+我会自动完成：
+
+**意图解析 → 策略生成 → 冲突检测 → SDN下发 → 验证命令生成**
+""")
+
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+
+prompt = st.chat_input("请输入您的网络管理指令...")
+
+if prompt:
+    submit_intent(prompt)
+    st.rerun()
