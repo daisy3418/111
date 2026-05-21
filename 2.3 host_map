@@ -1,0 +1,5 @@
+from config.topology_config import get_host_ip
+
+
+def get_ip(host):
+    return get_host_ip(host)
