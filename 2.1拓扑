@@ -1,0 +1,139 @@
+from mininet.topo import Topo
+from mininet.net import Mininet
+from mininet.node import RemoteController, OVSSwitch
+from mininet.cli import CLI
+from mininet.log import setLogLevel
+
+
+class EnterpriseSecurityTopo(Topo):
+    def build(self):
+        # =========================
+        # Hosts
+        # =========================
+
+        # Office area
+        h1 = self.addHost("h1", ip="10.0.1.1/16")
+        h2 = self.addHost("h2", ip="10.0.1.2/16")
+
+        # Server area
+        h3 = self.addHost("h3", ip="10.0.2.3/16")
+        h4 = self.addHost("h4", ip="10.0.2.4/16")
+
+        # Management security area
+        h5 = self.addHost("h5", ip="10.0.3.5/16")
+        h6 = self.addHost("h6", ip="10.0.3.6/16")
+
+        # =========================
+        # Switches
+        # =========================
+
+        # Core switch
+        s1 = self.addSwitch(
+            "s1",
+            dpid="0000000000000001",
+            protocols="OpenFlow13"
+        )
+
+        # Office area switch
+        s2 = self.addSwitch(
+            "s2",
+            dpid="0000000000000002",
+            protocols="OpenFlow13"
+        )
+
+        # Server area switch
+        s3 = self.addSwitch(
+            "s3",
+            dpid="0000000000000003",
+            protocols="OpenFlow13"
+        )
+
+        # Management security area switch
+        s4 = self.addSwitch(
+            "s4",
+            dpid="0000000000000004",
+            protocols="OpenFlow13"
+        )
+
+        # =========================
+        # Links
+        # =========================
+
+        # Core switch connects three security domains
+        self.addLink(s1, s2)
+        self.addLink(s1, s3)
+        self.addLink(s1, s4)
+
+        # Office area
+        self.addLink(s2, h1)
+        self.addLink(s2, h2)
+
+        # Server area
+        self.addLink(s3, h3)
+        self.addLink(s3, h4)
+
+        # Management security area
+        self.addLink(s4, h5)
+        self.addLink(s4, h6)
+
+
+def run():
+    topo = EnterpriseSecurityTopo()
+
+    net = Mininet(
+        topo=topo,
+        controller=None,
+        switch=OVSSwitch,
+        autoSetMacs=True
+    )
+
+    net.addController(
+        "c0",
+        controller=RemoteController,
+        ip="127.0.0.1",
+        port=6633
+    )
+
+    net.start()
+
+    print("")
+    print("====================================================")
+    print(" Enterprise Intranet Security Reinforcement Topology")
+    print("====================================================")
+    print("")
+    print("Ryu Controller")
+    print("      |")
+    print("      v")
+    print("s1 Core Switch")
+    print(" |            |             |")
+    print(" v            v             v")
+    print("s2           s3            s4")
+    print("Office       Server        Mgmt/Security")
+    print(" | \\          | \\           | \\")
+    print("h1 h2        h3 h4         h5 h6")
+    print("")
+    print("h1: Normal office user        10.0.1.1")
+    print("h2: Compromised HR host       10.0.1.2")
+    print("h3: Web server                10.0.2.3")
+    print("h4: Database server           10.0.2.4")
+    print("h5: Admin host                10.0.3.5")
+    print("h6: Audit monitor host        10.0.3.6")
+    print("")
+    print("Security Goal:")
+    print("- Isolate compromised host h2 only")
+    print("- Protect server area h3/h4")
+    print("- Protect management security area h5/h6")
+    print("- Keep h1 and h5 normal business access")
+    print("")
+    print("Try: pingall")
+    print("====================================================")
+    print("")
+
+    CLI(net)
+
+    net.stop()
+
+
+if __name__ == "__main__":
+    setLogLevel("info")
+    run()
