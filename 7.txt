@@ -1,80 +1,116 @@
-from agent.network_agent import run_network_agent
+def parse_intent(text):
+    text = text.strip().lower()
 
+    # 高级策略：服务器区保护
+    if "服务器区保护" in text or "保护服务器区" in text:
+        return [
+            {"src": "h1", "dst": "h4", "action": "deny"},
+            {"src": "h2", "dst": "h3", "action": "deny"},
+            {"src": "h2", "dst": "h4", "action": "deny"},
+            {"src": "h5", "dst": "h3", "action": "allow"},
+            {"src": "h5", "dst": "h4", "action": "allow"},
+        ]
 
-def print_result(result):
-    print("\n========== NetIntent-Shield Agent Report ==========")
+    # 高级策略：最小权限
+    if "最小权限" in text:
+        return [
+            {"src": "h1", "dst": "h4", "action": "deny"},
+            {"src": "h2", "dst": "h3", "action": "deny"},
+            {"src": "h2", "dst": "h4", "action": "deny"},
+            {"src": "h2", "dst": "h5", "action": "deny"},
+            {"src": "h2", "dst": "h6", "action": "deny"},
+            {"src": "h5", "dst": "h3", "action": "allow"},
+            {"src": "h5", "dst": "h4", "action": "allow"},
+        ]
 
-    print("\n[1] Task Type")
-    print(result.get("task_type", "unknown"))
+    # 管理安全区保护
+    if "管理安全区" in text and ("保护" in text or "禁止" in text or "阻止" in text):
+        return [
+            {"src": "h2", "dst": "h5", "action": "deny"},
+            {"src": "h2", "dst": "h6", "action": "deny"},
+        ]
 
-    print("\n[2] Summary")
-    print(result.get("summary", ""))
+    # 普通用户只能访问 Web，不能访问数据库
+    if ("普通用户" in text or "正常用户" in text or "h1" in text) and ("数据库" in text or "h4" in text):
+        if "不能" in text or "禁止" in text or "阻止" in text or "deny" in text or "block" in text:
+            return [
+                {"src": "h1", "dst": "h4", "action": "deny"}
+            ]
 
-    plan = result.get("plan", [])
-    print("\n[3] Configuration Plan")
-    if plan:
-        for i, step in enumerate(plan, start=1):
-            print(str(i) + ". " + step)
+    # 隔离异常主机，默认隔离服务器区和管理安全区
+    if ("隔离" in text or "isolate" in text) and ("异常主机" in text or "攻击主机" in text or "h2" in text):
+        rules = []
+
+        if "服务器区" in text or "web" in text or "web服务器" in text or "业务服务器" in text or "数据库" in text:
+            rules.append({"src": "h2", "dst": "h3", "action": "deny"})
+            rules.append({"src": "h2", "dst": "h4", "action": "deny"})
+
+        if "管理安全区" in text or "管理员" in text or "监控" in text or "审计" in text:
+            rules.append({"src": "h2", "dst": "h5", "action": "deny"})
+            rules.append({"src": "h2", "dst": "h6", "action": "deny"})
+
+        if not rules:
+            rules = [
+                {"src": "h2", "dst": "h3", "action": "deny"},
+                {"src": "h2", "dst": "h4", "action": "deny"},
+                {"src": "h2", "dst": "h5", "action": "deny"},
+                {"src": "h2", "dst": "h6", "action": "deny"},
+            ]
+
+        return rules
+
+    # 角色映射
+    role_map = {
+        "正常用户": "h1",
+        "普通用户": "h1",
+        "办公用户": "h1",
+
+        "异常主机": "h2",
+        "攻击主机": "h2",
+        "可疑主机": "h2",
+        "疑似攻击主机": "h2",
+
+        "web服务器": "h3",
+        "web server": "h3",
+        "业务服务器": "h3",
+        "web服务": "h3",
+
+        "数据库服务器": "h4",
+        "数据库": "h4",
+        "database": "h4",
+
+        "管理员主机": "h5",
+        "管理员": "h5",
+        "运维主机": "h5",
+
+        "监控审计主机": "h6",
+        "监控主机": "h6",
+        "审计主机": "h6",
+    }
+
+    hosts = []
+
+    for h in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+        if h in text and h not in hosts:
+            hosts.append(h)
+
+    for key, host in role_map.items():
+        if key in text and host not in hosts:
+            hosts.append(host)
+
+    if len(hosts) < 2:
+        raise ValueError("need two hosts, like h1 and h3")
+
+    src = hosts[0]
+    dst = hosts[1]
+
+    if "禁止" in text or "阻止" in text or "不能" in text or "不允许" in text or "deny" in text or "block" in text:
+        action = "deny"
+    elif "允许" in text or "可以" in text or "allow" in text or "permit" in text:
+        action = "allow"
     else:
-        print("No plan generated.")
+        raise ValueError("unknown action, use 禁止 or 允许")
 
-    rules = result.get("rules", [])
-    print("\n[4] Structured Rules")
-    if rules:
-        for r in rules:
-            print(r)
-    else:
-        print("No rules generated.")
-
-    conflicts = result.get("conflicts", [])
-    print("\n[5] Conflict Check")
-    if conflicts:
-        print("Conflict detected:")
-        for c in conflicts:
-            print(c)
-        print("Policy will not be applied.")
-    else:
-        print("No conflict detected.")
-
-    apply_results = result.get("apply_results", [])
-    print("\n[6] Apply Results")
-    if apply_results:
-        for r in apply_results:
-            print(r)
-    else:
-        print("No policy applied.")
-
-    verification = result.get("verification", [])
-    print("\n[7] Verification Commands")
-    if verification:
-        for item in verification:
-            print(item["cmd"] + "    expected: " + item["expected"])
-    else:
-        print("No verification command generated.")
-
-    print("\n===================================================")
-
-
-def main():
-    print("NetIntent-Shield Network Configuration Agent")
-    print("Input natural language network configuration intent.")
-    print("Example: 配置服务器区保护策略")
-    print("Example: 按照最小权限原则配置当前内网")
-    print("Example: 保护管理安全区，禁止异常主机访问管理员主机和监控审计主机")
-    print("Type exit to quit.\n")
-
-    while True:
-        user_input = input("Intent> ").strip()
-
-        if user_input.lower() in ["exit", "quit"]:
-            break
-
-        if not user_input:
-            continue
-
-        result = run_network_agent(user_input)
-        print_result(result)
-
-
-if __name__ == "__main__":
-    main()
+    return [
+        {"src": src, "dst": dst, "action": action}
+    ]
