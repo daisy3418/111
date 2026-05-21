@@ -1,0 +1,67 @@
+import json
+from urllib.request import Request, urlopen
+
+
+RYU_URL = "http://127.0.0.1:8080"
+
+
+def get_switches():
+    resp = urlopen(RYU_URL + "/stats/switches")
+    data = resp.read().decode()
+    return json.loads(data)
+
+
+def get_flows(dpid):
+    resp = urlopen(RYU_URL + "/stats/flow/" + str(dpid))
+    data = resp.read().decode()
+    return json.loads(data)
+
+
+def add_drop_flow(src_ip, dst_ip, dpid=1, priority=100):
+    payload = {
+        "dpid": dpid,
+        "priority": priority,
+        "match": {
+            "eth_type": 2048,
+            "ipv4_src": src_ip,
+            "ipv4_dst": dst_ip
+        },
+        "actions": []
+    }
+
+    data = json.dumps(payload).encode()
+
+    req = Request(
+        RYU_URL + "/stats/flowentry/add",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
+    resp = urlopen(req)
+    return resp.status
+
+
+def clear_flows(dpid):
+    req = Request(
+        RYU_URL + "/stats/flowentry/clear/" + str(dpid),
+        data=b"",
+        method="DELETE"
+    )
+
+    resp = urlopen(req)
+    return resp.status
+
+
+def clear_all_flows():
+    switches = get_switches()
+    results = []
+
+    for dpid in switches:
+        status = clear_flows(dpid)
+        results.append({
+            "dpid": dpid,
+            "status": status
+        })
+
+    return results
