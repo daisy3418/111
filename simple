@@ -1,0 +1,127 @@
+def parse_intent(text):
+    text = text.strip().lower()
+
+    # 主场景：HR / h2 被攻陷，需要全域安全加固
+    if (
+        "hr" in text
+        or "h2" in text
+        or "攻击者" in text
+        or "被攻陷" in text
+        or "被控制" in text
+        or "安全加固" in text
+        or "内网入侵" in text
+    ):
+        if (
+            "服务器区" in text
+            and "管理安全区" in text
+        ) or (
+            "最小权限" in text
+        ) or (
+            "不要影响正常用户" in text
+        ):
+            return [
+                {"src": "h2", "dst": "h3", "action": "deny"},
+                {"src": "h2", "dst": "h4", "action": "deny"},
+                {"src": "h2", "dst": "h5", "action": "deny"},
+                {"src": "h2", "dst": "h6", "action": "deny"},
+                {"src": "h1", "dst": "h3", "action": "allow"},
+                {"src": "h5", "dst": "h3", "action": "allow"},
+                {"src": "h5", "dst": "h4", "action": "allow"},
+            ]
+
+    # 服务器区保护
+    if "服务器区" in text and ("扫描" in text or "保护" in text or "横向移动" in text or "阻断" in text):
+        return [
+            {"src": "h2", "dst": "h3", "action": "deny"},
+            {"src": "h2", "dst": "h4", "action": "deny"},
+        ]
+
+    # 管理安全区保护
+    if "管理安全区" in text or "管理员主机" in text or "监控审计主机" in text:
+        if "禁止" in text or "阻断" in text or "保护" in text or "攻击者" in text:
+            return [
+                {"src": "h2", "dst": "h5", "action": "deny"},
+                {"src": "h2", "dst": "h6", "action": "deny"},
+            ]
+
+    # 最小权限
+    if "最小权限" in text:
+        return [
+            {"src": "h2", "dst": "h3", "action": "deny"},
+            {"src": "h2", "dst": "h4", "action": "deny"},
+            {"src": "h2", "dst": "h5", "action": "deny"},
+            {"src": "h2", "dst": "h6", "action": "deny"},
+            {"src": "h1", "dst": "h3", "action": "allow"},
+            {"src": "h5", "dst": "h3", "action": "allow"},
+            {"src": "h5", "dst": "h4", "action": "allow"},
+        ]
+
+    # 冲突检测场景
+    if "允许" in text and "禁止" in text:
+        if "h2" in text and ("数据库" in text or "h4" in text):
+            return [
+                {"src": "h2", "dst": "h4", "action": "allow"},
+                {"src": "h2", "dst": "h4", "action": "deny"},
+            ]
+
+        if "h1" in text and ("web" in text or "web服务器" in text or "h3" in text):
+            return [
+                {"src": "h1", "dst": "h3", "action": "allow"},
+                {"src": "h1", "dst": "h3", "action": "deny"},
+            ]
+
+    # 角色映射
+    role_map = {
+        "正常用户": "h1",
+        "普通用户": "h1",
+        "办公用户": "h1",
+
+        "hr": "h2",
+        "hr主机": "h2",
+        "被攻陷主机": "h2",
+        "攻击主机": "h2",
+        "异常主机": "h2",
+        "攻击者": "h2",
+
+        "web服务器": "h3",
+        "web server": "h3",
+        "业务服务器": "h3",
+
+        "数据库服务器": "h4",
+        "数据库": "h4",
+        "database": "h4",
+
+        "管理员主机": "h5",
+        "管理员": "h5",
+
+        "监控审计主机": "h6",
+        "监控主机": "h6",
+        "审计主机": "h6",
+    }
+
+    hosts = []
+
+    for h in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+        if h in text and h not in hosts:
+            hosts.append(h)
+
+    for key, host in role_map.items():
+        if key in text and host not in hosts:
+            hosts.append(host)
+
+    if len(hosts) < 2:
+        raise ValueError("need two hosts, like h1 and h3")
+
+    src = hosts[0]
+    dst = hosts[1]
+
+    if "禁止" in text or "阻断" in text or "不能" in text or "不允许" in text or "deny" in text or "block" in text:
+        action = "deny"
+    elif "允许" in text or "可以" in text or "allow" in text or "permit" in text:
+        action = "allow"
+    else:
+        raise ValueError("unknown action, use 禁止 or 允许")
+
+    return [
+        {"src": src, "dst": dst, "action": action}
+    ]
