@@ -1,0 +1,42 @@
+from config.topology_config import get_host_ip, get_host_dpid
+from sdn.ryu_api import add_drop_flow
+
+
+def apply_rule(src, dst, action):
+    src_ip = get_host_ip(src)
+    dst_ip = get_host_ip(dst)
+
+    # 策略下发到源主机接入交换机
+    # 例如 h2 被攻陷，h2 接入 s2，所以阻断策略下发到 dpid=2
+    dpid = get_host_dpid(src)
+
+    if action == "deny":
+        status = add_drop_flow(
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            dpid=dpid
+        )
+
+        return {
+            "src": src,
+            "dst": dst,
+            "action": action,
+            "src_ip": src_ip,
+            "dst_ip": dst_ip,
+            "dpid": dpid,
+            "status": status
+        }
+
+    if action == "allow":
+        # 默认网络互通，allow 作为业务保留说明，不额外下发 drop 流表
+        return {
+            "src": src,
+            "dst": dst,
+            "action": action,
+            "src_ip": src_ip,
+            "dst_ip": dst_ip,
+            "dpid": dpid,
+            "status": "skip"
+        }
+
+    raise ValueError("unknown action: " + action)
