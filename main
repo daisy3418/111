@@ -1,0 +1,89 @@
+from agent.network_agent import run_network_agent
+
+
+def print_result(result):
+    print("\n========== NetIntent-Shield Security Reinforcement Report ==========")
+
+    print("\n[1] Task Type")
+    print(result.get("task_type", "unknown"))
+
+    print("\n[2] Security Event Recognition")
+    print(result.get("event_recognition", ""))
+
+    print("\n[3] Risk Analysis")
+    risk_analysis = result.get("risk_analysis", [])
+    if risk_analysis:
+        for i, item in enumerate(risk_analysis, start=1):
+            print(str(i) + ". " + item)
+    else:
+        print("No risk analysis generated.")
+
+    print("\n[4] Reinforcement Suggestions")
+    suggestions = result.get("suggestions", [])
+    if suggestions:
+        for i, item in enumerate(suggestions, start=1):
+            print(str(i) + ". " + item)
+    else:
+        print("No suggestion generated.")
+
+    print("\n[5] Structured Security Rules")
+    rules = result.get("rules", [])
+    if rules:
+        for r in rules:
+            print(r)
+    else:
+        print("No rules generated.")
+
+    print("\n[6] Conflict Check")
+    conflicts = result.get("conflicts", [])
+    if conflicts:
+        print("Conflict detected:")
+        for c in conflicts:
+            print(c)
+        print("Policy will not be applied.")
+    else:
+        print("No conflict detected.")
+
+    print("\n[7] Apply Results")
+    apply_results = result.get("apply_results", [])
+    if apply_results:
+        for r in apply_results:
+            print(r)
+    else:
+        print("No policy applied.")
+
+    print("\n[8] Verification Commands")
+    verification = result.get("verification", [])
+    if verification:
+        for item in verification:
+            print(item["cmd"] + "    expected: " + item["expected"])
+    else:
+        print("No verification command generated.")
+
+    print("\n[9] Summary")
+    print(result.get("summary", ""))
+
+    print("\n====================================================================")
+
+
+def main():
+    print("NetIntent-Shield: AI-SDN Intranet Security Reinforcement Agent")
+    print("Input a security incident or reinforcement intent.")
+    print("Example: HR 主机 h2 被攻击者控制，请进行内网安全加固，保护服务器区和管理安全区，同时不要影响正常用户和管理员业务。")
+    print("Type exit to quit.\n")
+
+    while True:
+        user_input = input("Intent> ").strip()
+
+        if user_input.lower() in ["exit", "quit"]:
+            break
+
+        if not user_input:
+            continue
+
+        result = run_network_agent(user_input)
+        print_result(result)
+
+
+if __name__ == "__main__":
+    main()
